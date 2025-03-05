@@ -12,76 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !unix || solaris
-
-package caddy
+package tscaddy
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"os"
 	"slices"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/caddyserver/caddy/v2"
 	"go.uber.org/zap"
 )
+
+var listenerPool = caddy.NewUsagePool()
 
 func reuseUnixSocket(_, _ string) (any, error) {
 	return nil, nil
 }
 
-func listenReusable(ctx context.Context, lnKey string, network, address string, config net.ListenConfig) (any, error) {
-	var socketFile *os.File
-
-	fd := slices.Contains([]string{"fd", "fdgram"}, network)
-	if fd {
-		socketFd, err := strconv.ParseUint(address, 0, strconv.IntSize)
-		if err != nil {
-			return nil, fmt.Errorf("invalid file descriptor: %v", err)
-		}
-
-		func() {
-			socketFilesMu.Lock()
-			defer socketFilesMu.Unlock()
-
-			socketFdWide := uintptr(socketFd)
-			var ok bool
-
-			socketFile, ok = socketFiles[socketFdWide]
-
-			if !ok {
-				socketFile = os.NewFile(socketFdWide, lnKey)
-				if socketFile != nil {
-					socketFiles[socketFdWide] = socketFile
-				}
-			}
-		}()
-
-		if socketFile == nil {
-			return nil, fmt.Errorf("invalid socket file descriptor: %d", socketFd)
-		}
-	}
-
-	datagram := slices.Contains([]string{"udp", "udp4", "udp6", "unixgram", "fdgram"}, network)
+func listenReusable(ctx context.Context, lnKey string, network, address string, config net.ListenConfig, doListen func(context.Context, string, string) (any, error)) (any, error) {
+	datagram := slices.Contains([]string{"udp", "udp4", "udp6", "unixgram"}, network)
 	if datagram {
-		sharedPc, _, err := listenerPool.LoadOrNew(lnKey, func() (Destructor, error) {
-			var (
-				pc  net.PacketConn
-				err error
-			)
-			if fd {
-				pc, err = net.FilePacketConn(socketFile)
-			} else {
-				pc, err = config.ListenPacket(ctx, network, address)
-			}
+		sharedPc, _, err := listenerPool.LoadOrNew(lnKey, func() (caddy.Destructor, error) {
+			pc, err := doListen(ctx, network, address)
 			if err != nil {
 				return nil, err
 			}
-			return &sharedPacketConn{PacketConn: pc, key: lnKey}, nil
+			return &sharedPacketConn{PacketConn: pc.(net.PacketConn), key: lnKey}, nil
 		})
 		if err != nil {
 			return nil, err
@@ -89,20 +49,12 @@ func listenReusable(ctx context.Context, lnKey string, network, address string, 
 		return &fakeClosePacketConn{sharedPacketConn: sharedPc.(*sharedPacketConn)}, nil
 	}
 
-	sharedLn, _, err := listenerPool.LoadOrNew(lnKey, func() (Destructor, error) {
-		var (
-			ln  net.Listener
-			err error
-		)
-		if fd {
-			ln, err = net.FileListener(socketFile)
-		} else {
-			ln, err = config.Listen(ctx, network, address)
-		}
+	sharedLn, _, err := listenerPool.LoadOrNew(lnKey, func() (caddy.Destructor, error) {
+		ln, err := doListen(ctx, network, address)
 		if err != nil {
 			return nil, err
 		}
-		return &sharedListener{Listener: ln, key: lnKey}, nil
+		return &sharedListener{Listener: ln.(net.Listener), key: lnKey}, nil
 	})
 	if err != nil {
 		return nil, err
@@ -147,7 +99,7 @@ func (fcl *fakeCloseListener) Accept() (net.Conn, error) {
 				err = tconn.SetKeepAlive(false)
 			}
 			if err != nil {
-				Log().With(zap.String("server", fcl.sharedListener.key)).Warn("unable to set keepalive for new connection:", zap.Error(err))
+				caddy.Log().With(zap.String("server", fcl.sharedListener.key)).Warn("unable to set keepalive for new connection:", zap.Error(err))
 			}
 		}
 		return conn, nil
