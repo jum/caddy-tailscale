@@ -44,7 +44,7 @@ func init() {
 	hostinfo.SetApp("caddy")
 }
 
-func getTCPListener(c context.Context, network string, host string, portRange string, portOffset uint, _ net.ListenConfig) (any, error) {
+func getTCPListener(c context.Context, network string, host string, portRange string, portOffset uint, config net.ListenConfig) (any, error) {
 	ctx, ok := c.(caddy.Context)
 	if !ok {
 		return nil, fmt.Errorf("context is not a caddy.Context: %T", c)
@@ -69,10 +69,13 @@ func getTCPListener(c context.Context, network string, host string, portRange st
 	if network == "" {
 		network = "tcp"
 	}
-	return s.Listen(network, ":"+port)
+
+	return listenReusable(c, listenerKey(network, addr), network, addr, config, func(_ context.Context, network, addr string) (any, error) {
+		return s.Listen(network, ":"+port)
+	})
 }
 
-func getTLSListener(c context.Context, network string, host string, portRange string, portOffset uint, _ net.ListenConfig) (any, error) {
+func getTLSListener(c context.Context, network string, host string, portRange string, portOffset uint, config net.ListenConfig) (any, error) {
 	ctx, ok := c.(caddy.Context)
 	if !ok {
 		return nil, fmt.Errorf("context is not a caddy.Context: %T", c)
@@ -97,21 +100,24 @@ func getTLSListener(c context.Context, network string, host string, portRange st
 	if network == "" {
 		network = "tcp"
 	}
-	ln, err := s.Listen(network, ":"+port)
+
+	ln, err := listenReusable(c, listenerKey(network, addr), network, addr, config, func(_ context.Context, network, addr string) (any, error) {
+		return s.Listen(network, ":"+port)
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	localClient, _ := s.LocalClient()
 
-	ln = tls.NewListener(ln, &tls.Config{
+	ln = tls.NewListener(ln.(net.Listener), &tls.Config{
 		GetCertificate: localClient.GetCertificate,
 	})
 
 	return ln, nil
 }
 
-func getUDPListener(c context.Context, network string, host string, portRange string, portOffset uint, _ net.ListenConfig) (any, error) {
+func getUDPListener(c context.Context, network string, host string, portRange string, portOffset uint, config net.ListenConfig) (any, error) {
 	ctx, ok := c.(caddy.Context)
 	if !ok {
 		return nil, fmt.Errorf("context is not a caddy.Context: %T", c)
@@ -151,7 +157,10 @@ func getUDPListener(c context.Context, network string, host string, portRange st
 			break
 		}
 	}
-	return s.Server.ListenPacket(network, ap.String())
+
+	return listenReusable(c, listenerKey(network, addr), network, addr, config, func(_ context.Context, network, addr string) (any, error) {
+		return s.Server.ListenPacket(network, ap.String())
+	})
 }
 
 // nodes are the Tailscale nodes that have been configured and started.
