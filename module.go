@@ -49,12 +49,12 @@ func getTCPListener(c context.Context, network string, host string, portRange st
 	if !ok {
 		return nil, fmt.Errorf("context is not a caddy.Context: %T", c)
 	}
-	
+
 	na, err := caddy.ParseNetworkAddress(caddy.JoinNetworkAddress(network, host, portRange))
 	if err != nil {
 		return nil, err
 	}
-	
+
 	addr := na.JoinHostPort(portOffset)
 	network, host, port, err := caddy.SplitNetworkAddress(addr)
 	if err != nil {
@@ -82,7 +82,7 @@ func getTLSListener(c context.Context, network string, host string, portRange st
 	if err != nil {
 		return nil, err
 	}
-	
+
 	addr := na.JoinHostPort(portOffset)
 	network, host, port, err := caddy.SplitNetworkAddress(addr)
 	if err != nil {
@@ -121,7 +121,7 @@ func getUDPListener(c context.Context, network string, host string, portRange st
 	if err != nil {
 		return nil, err
 	}
-	
+
 	addr := na.JoinHostPort(portOffset)
 	network, host, port, err := caddy.SplitNetworkAddress(addr)
 	if err != nil {
@@ -141,7 +141,7 @@ func getUDPListener(c context.Context, network string, host string, portRange st
 	if network == "" {
 		network = "udp"
 	}
-	
+
 	var ap netip.AddrPort
 
 	// We can only return one listener and MagicDNS returns IPv4 addresses unless IPv4 is disabled
@@ -159,7 +159,7 @@ func getUDPListener(c context.Context, network string, host string, portRange st
 			}
 		}
 	}
-	
+
 	// Second pass: look for IPv6 tsnet address if IPv6 was implicitly ("udp") or explicitly ("udp6") requested
 	if !ap.IsValid() && (network == "udp" || network == "udp6") {
 		for _, ip := range st.TailscaleIPs {
@@ -171,11 +171,11 @@ func getUDPListener(c context.Context, network string, host string, portRange st
 			}
 		}
 	}
-	
+
 	if !ap.IsValid() {
 		return nil, fmt.Errorf("no suitable Tailscale IP address found for UDP listener")
 	}
-	
+
 	return s.Server.ListenPacket(network, ap.String())
 }
 
